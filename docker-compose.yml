@@ -74,16 +74,12 @@ services:
     restart: unless-stopped
     environment:
       REACT_APP_API_URL: http://localhost:5000/api
-      REACT_APP_ENV: production
+      BROWSER: none
+      REACT_APP_ENV: development
     ports:
       - "3001:3000"
     depends_on:
       - backend
-    volumes:
-      - ./client:/app
-      - /app/node_modules
-    networks:
-      - gigshield-network
     command: npm start
 
   # Nginx Reverse Proxy (Optional)
@@ -107,6 +103,7 @@ volumes:
     driver: local
   redis_data:
     driver: local
+  frontend_node_modules:
 
 networks:
   gigshield-network:

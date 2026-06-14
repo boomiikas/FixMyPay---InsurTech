@@ -1,181 +1,128 @@
-# FixMyPay Docker Setup For A New System
+# FixMyPay - Explainable, Auditable, Parametric Insurance Decision Platform for Gig Workers
 
-**Project Report: https://drive.google.com/file/d/1V4-zO2uT34TTiP9J9hlpHumZLM20TLBD/view?usp=sharing**
+FixMyPay is an AI-powered micro-insurance platform designed for platform-based delivery partners. It enables zero-touch, objective claim verification and payout decisions using weather, pollution, and traffic sensor data. 
 
-This guide is the recommended way to run the project on a fresh machine with minimum setup issues.
+The platform features a transparent **Explainable Claim Decision Engine (ECDE)** and an immutable **Claim Timeline & Audit Trail** for full regulatory compliance and human-in-the-loop control.
 
-No local Node.js, MongoDB, Redis, or Python installation is required when using Docker.
+---
 
-## 1. Prerequisites
+## 🚀 Key Features
 
-Install the following first:
+- **Explainable Claim Decision Engine (ECDE):** Replaces legacy black-box automation with deterministic, audit-friendly rules verifying coverage active status, fraud probability, and threshold-activated environmental triggers.
+- **Claim Timeline & Audit Trail:** Immutable stage logging that records weather verification, traffic congestion ratios, fraud score metrics, reliability scoring, and admin approvals step-by-step.
+- **Real-Time Parametric Sensors:** Validates claims using OpenWeather, OpenAQ, and Google Maps API data against policy thresholds.
+- **Anti-Spoofing & Fraud Detection:** Runs parallel rule checks and an AdaBoost ML model evaluating GPS spoofing, delivery active states, and unusual frequencies.
+- **Business Impact Dashboard:** Tracks advanced KPIs such as Workers Protected, Income Protected, prevented fraud amounts, processing SLAs, and review queue bottleneck metrics.
 
-- Git
-- Docker Desktop
+---
 
-Verify installation:
+## 🏗️ Technical Stack
 
+- **Frontend:** React.js, Tailwind CSS, React Router, Axios.
+- **Backend:** Node.js, Express.js.
+- **Database:** MongoDB (with Mongoose ODM).
+- **Caching & Runtime Logs:** Redis.
+- **Fraud ML Engine:** Python 3 (AdaBoost model).
+- **Orchestration:** Docker Compose.
+
+---
+
+## 🛠️ Getting Started (Docker Setup)
+
+The recommended way to run FixMyPay is using Docker. No local Node.js, MongoDB, Redis, or Python environment is needed on your host system.
+
+### 1. Prerequisites
+
+Ensure you have installed:
+- [Git](https://git-scm.com/)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+
+Verify they are running:
 ```bash
-git --version
 docker --version
 docker compose version
 ```
 
-If all commands return versions, continue.
+### 2. Configure Environment
 
-## 2. Clone The Project
+Copy `.env.example` to create a `.env` file in the root folder:
 
-```bash
-git clone <your-repository-url>
-cd "Guidewire hackathon"
-```
-
-## 3. Create The Environment File
-
-Copy .env.example to .env.
-
-Windows PowerShell:
-
+**Windows PowerShell:**
 ```powershell
 Copy-Item .env.example .env
 ```
 
-macOS/Linux:
-
+**macOS/Linux:**
 ```bash
 cp .env.example .env
 ```
 
-Important:
+*Note: For local demo mode, keep `UPI_FAKE_MODE=true` to process simulated payouts instantly.*
 
-- Keep UPI_FAKE_MODE=true for demo payouts.
-- For full live weather, pollution, and traffic features, use valid API keys in .env.
+### 3. Run the Stack
 
-## 4. Start Docker Desktop
-
-Make sure Docker Desktop is fully started before running compose commands.
-
-## 5. Start The Stack (Recommended No-Error Command)
-
-Start only core services first (recommended for new systems):
+Start Docker Desktop, then execute the following build command:
 
 ```bash
 docker compose up -d --build mongodb redis backend frontend
 ```
 
-Why this command:
+This starts only the core services needed to run the application, avoiding Nginx SSL port mapping issues on local machines.
 
-- Starts everything needed for app features.
-- Avoids optional reverse-proxy startup issues on machines without SSL setup.
-
-Optional: start full stack including nginx
-
-```bash
-docker compose up -d --build
-```
-
-## 6. Verify Containers Are Healthy
-
+To check container health status:
 ```bash
 docker compose ps
 ```
 
-Expected running services:
+---
 
-- fixmypay-mongodb
-- fixmypay-redis
-- fixmypay-backend
-- fixmypay-frontend
+## 🌐 Access Points & Demo Credentials
 
-## 7. Open The Application
+### Worker Portal
+- **URL:** [http://localhost:3001](http://localhost:3001)
+- **Login:** `worker@gigshield.com` / `applein12`
+- **Features:** Monitor environmental threat levels, pay weekly premiums, view active weekly coverages, and trigger parametric claims.
 
-- Frontend: http://localhost:3001
-- Backend health endpoint: http://localhost:5000/api/health
+### Admin Portal
+- **URL:** [http://localhost:3001/admin](http://localhost:3001/admin)
+- **Login:** `admin@gigshield.com` / `the34eye`
+- **Features:** Review the advanced ECDE dashboard, view the pending claim review queue, check fraud audits, run simulated disruptions, and approve suggested payouts.
 
-## 8. First-Time Feature Validation Checklist
+### API Entry points
+- **Backend Base API:** `http://localhost:5000/api`
+- **Health Check:** `http://localhost:5000/api/health`
 
-Use this quick checklist to confirm major features are running:
+---
 
-1. Register a Worker account.
-2. Register an Admin account.
-3. Worker pays weekly premium (demo mode works with UPI_FAKE_MODE=true).
-4. Worker dashboard shows active weekly coverage and earnings protected metrics.
-5. Admin dashboard shows:
-	- loss ratio
-	- predicted next-week claims
-	- likely next-week weather/disruption claim mix chart
-6. Admin fraud simulation runs and returns model score, risk level, and explanation.
+## 🧪 Seeding & Test Verification
 
-## 9. Useful Commands
-
-View service logs:
-
+### Seed Demo Accounts
+To seed or reset default demo credentials (worker and admin accounts) in your local database, run:
 ```bash
-docker compose logs -f backend
-docker compose logs -f frontend
+docker compose exec backend node scripts/seedDemoUsers.js
 ```
 
-Restart specific service:
-
+### Run ECDE Rule Engine Unit Tests
+To test the ECDE rule logic, reliability calculations, and timeline audits without needing to boot database containers, you can execute the unit test script:
 ```bash
-docker compose restart backend
-docker compose restart frontend
+node scripts/testRecommendationEngine.js
 ```
 
-Stop all services:
+Expected output includes detailed checkmark results for:
+- [✓] Weather Verification (Rainfall ratio check)
+- [✓] Coverage Active (Subscription status check)
+- [✓] Low Fraud Probability (Risk score threshold)
+- [✓] Step-by-Step Claim Timeline trace
 
-```bash
-docker compose down
-```
+---
 
-Clean reset (containers + volumes):
+## 📊 Useful Docker Commands
 
-```bash
-docker compose down -v
-docker compose up -d --build mongodb redis backend frontend
-```
-
-## 10. Ports Used
-
-- 3001: frontend
-- 5000: backend API
-- 27017: MongoDB
-- 6379: Redis
-- 80 and 443: nginx (only when full stack is started)
-
-## 11. Troubleshooting (Most Common)
-
-Docker command not found:
-
-- Restart Docker Desktop.
-- Reopen terminal and run docker --version again.
-
-Port already in use:
-
-- Stop conflicting apps on 3001, 5000, 27017, 6379.
-- Then restart compose.
-
-Frontend opens but API calls fail:
-
-- Check backend logs: docker compose logs -f backend
-- Verify health endpoint: http://localhost:5000/api/health
-
-Monitoring and environmental triggers not working:
-
-- Ensure WEATHER_API_KEY, POLLUTION_API_KEY, TRAFFIC_API_KEY are valid in .env.
-- Rebuild backend after updating env:
-
-```bash
-docker compose up -d --build backend
-```
-
-Fraud model command runs locally but fails in host Python:
-
-- Prefer running app features via Docker backend.
-- If host Python is used, install compatible sklearn/pandas/joblib versions.
-
-## 12. One-Line Quick Start
-
-```bash
-git clone <your-repository-url> && cd "Guidewire hackathon" && cp .env.example .env && docker compose up -d --build mongodb redis backend frontend
-```
+- **View backend server logs:** `docker compose logs -f backend`
+- **View frontend client logs:** `docker compose logs -f frontend`
+- **Restart Backend:** `docker compose restart backend`
+- **Reset Stack (containers + volumes):**
+  ```bash
+  docker compose down -v
+  docker compose up -d --build mongodb redis backend frontend
+  ```

@@ -147,6 +147,41 @@ const claimSchema = new mongoose.Schema({
       humanOverride: Boolean
     }
   },
+
+  ecdeDetails: {
+    decision: { 
+      type: String, 
+      enum: ['recommended_approval', 'manual_review', 'recommended_rejection']
+    },
+    confidenceScore: { type: Number },
+    reliabilityScore: { type: Number },
+    suggestedCompensation: { type: Number },
+    environmentalImpactFactor: { type: Number },
+    whyThisRecommendation: {
+      weatherVerified: { type: Boolean, default: false },
+      trafficVerified: { type: Boolean, default: false },
+      pollutionVerified: { type: Boolean, default: false },
+      coverageActive: { type: Boolean, default: false },
+      fraudRiskLow: { type: Boolean, default: false },
+      similarClaimsApproved: { type: Boolean, default: false }
+    },
+    explanation: [{ type: String }],
+    decisionTimeMs: { type: Number },
+    isWithinSLA: { type: Boolean, default: true },
+    fraudPrevention: {
+      potentialFraudPrevented: { type: Number, default: 0 },
+      isFraudFlagged: { type: Boolean, default: false },
+      compensationSaved: { type: Number, default: 0 }
+    },
+    evaluatedAt: { type: Date }
+  },
+
+  timeline: [{
+    event: { type: String, required: true },
+    status: { type: String, enum: ['success', 'warning', 'failed', 'pending'], required: true },
+    timestamp: { type: Date, default: Date.now },
+    metadata: { type: mongoose.Schema.Types.Mixed }
+  }],
   
   metadata: {
     createdAt: { type: Date, default: Date.now },
@@ -169,6 +204,8 @@ claimSchema.index({ 'trigger.timestamp': -1 });
 claimSchema.index({ 'fraud.riskScore': 1 });
 claimSchema.index({ 'payoutStatus': 1 });
 claimSchema.index({ 'metadata.createdAt': -1 });
+claimSchema.index({ 'ecdeDetails.decision': 1 });
+claimSchema.index({ 'ecdeDetails.reliabilityScore': 1 });
 
 // Virtual for processing time in human readable format
 claimSchema.virtual('processingTimeHuman').get(function() {

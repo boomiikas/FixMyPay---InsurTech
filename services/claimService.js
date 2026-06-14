@@ -1,6 +1,7 @@
 const { Claim, Policy, Worker, MonitoringData } = require('../models');
 const fraudDetectionService = require('./fraudDetectionService');
 const payoutService = require('./payoutService');
+const recommendationService = require('./recommendationService');
 const { v4: uuidv4 } = require('uuid');
 
 class ClaimService {
@@ -75,6 +76,13 @@ class ClaimService {
             automatedDecision: 'initiated'
           }
         }
+      });
+
+      // Log claim submission event to timeline
+      recommendationService.logTimelineEvent(claim, 'claim_submitted', 'success', {
+        triggerType: triggerData.type,
+        location: triggerData.location,
+        timestamp: new Date()
       });
 
       await claim.save();
@@ -326,9 +334,40 @@ class ClaimService {
         throw new Error('Claim not found');
       }
 
+      const policy = claim.policyId;
+      const worker = claim.workerId;
+
       // Update status to validating
       claim.status.current = 'validating';
       claim.status.validatedAt = new Date();
+
+      // Log verification step based on trigger type
+      const triggerType = claim.trigger?.type;
+      let envStatus = 'success';
+      let consensus = claim.validation?.consensusScore !== undefined ? claim.validation.consensusScore : 1.0;
+      if (consensus < 0.6) {
+        envStatus = 'warning';
+      }
+
+      if (triggerType === 'extreme_weather') {
+        recommendationService.logTimelineEvent(claim, 'weather_verification', envStatus, {
+          detected: claim.trigger.detectedValues?.weather,
+          thresholds: claim.trigger.thresholds?.weather,
+          consensusScore: consensus
+        });
+      } else if (triggerType === 'traffic_congestion') {
+        recommendationService.logTimelineEvent(claim, 'traffic_verification', envStatus, {
+          detected: claim.trigger.detectedValues?.traffic,
+          thresholds: claim.trigger.thresholds?.traffic,
+          consensusScore: consensus
+        });
+      } else if (triggerType === 'high_pollution') {
+        recommendationService.logTimelineEvent(claim, 'pollution_verification', envStatus, {
+          detected: claim.trigger.detectedValues?.pollution,
+          thresholds: claim.trigger.thresholds?.pollution,
+          consensusScore: consensus
+        });
+      }
 
       if (claim.audit?.source === 'simulation') {
         claim.fraud.riskScore = 0.1;
@@ -342,58 +381,75 @@ class ClaimService {
         claim.fraud.manualReviewRequired = fraudResult.manualReviewRequired;
       }
 
-      // Make decision based on validation and fraud analysis
-      const consensusThreshold = 0.6; // Minimum consensus score
-      const fraudThreshold = 0.7; // Maximum acceptable fraud score
+      // Log fraud check completion
+      const fraudStatus = claim.fraud.riskScore >= 0.7 ? 'failed' : claim.fraud.riskScore >= 0.4 ? 'warning' : 'success';
+      recommendationService.logTimelineEvent(claim, 'fraud_detected', fraudStatus, {
+        riskScore: claim.fraud.riskScore,
+        flagsCount: claim.fraud.flags?.length || 0
+      });
 
-      if (claim.validation.consensusScore >= consensusThreshold && 
-          claim.fraud.riskScore < fraudThreshold) {
-        // Approve claim
-        claim.status.current = 'approved';
-        claim.status.approvedAt = new Date();
-        claim.audit.decisionLogic.automatedDecision = 'approved';
-        
-        // Update policy claims count
-        await Policy.findByIdAndUpdate(claim.policyId._id, {
-          $inc: {
-            'claims.totalClaims': 1,
-            'claims.approvedClaims': 1,
-            'claims.totalPayoutAmount': claim.financial.payoutAmount
-          },
-          $set: {
-            'claims.lastClaimDate': new Date()
-          }
-        });
+      // Run Explainable Claim Decision Engine (ECDE)
+      const ecdeResult = await recommendationService.evaluateClaim(claim, policy, worker);
+      claim.ecdeDetails = ecdeResult;
 
-        // Process payout
-        await this.processPayout(claim._id);
-        
-      } else if (claim.fraud.riskScore >= fraudThreshold) {
-        // Flag for manual review
+      // Log reliability score calculation
+      const reliabilityStatus = ecdeResult.reliabilityScore >= 70 ? 'success' : ecdeResult.reliabilityScore >= 40 ? 'warning' : 'failed';
+      recommendationService.logTimelineEvent(claim, 'reliability_calculated', reliabilityStatus, {
+        reliabilityScore: ecdeResult.reliabilityScore,
+        confidenceScore: ecdeResult.confidenceScore,
+        factors: ecdeResult.whyThisRecommendation
+      });
+
+      // Log ECDE recommendation generation
+      recommendationService.logTimelineEvent(claim, 'ecde_recommendation_generated', 'success', {
+        decision: ecdeResult.decision,
+        suggestedCompensation: ecdeResult.suggestedCompensation,
+        explanations: ecdeResult.explanation
+      });
+
+      // Apply decision to claim status (gated under review for final human approval)
+      if (ecdeResult.decision === 'recommended_approval' || ecdeResult.decision === 'manual_review') {
         claim.status.current = 'under_review';
         claim.fraud.manualReviewRequired = true;
-        claim.audit.decisionLogic.automatedDecision = 'manual_review';
-        
-        // Update policy claims count
-        await Policy.findByIdAndUpdate(claim.policyId._id, {
+        claim.audit.decisionLogic.automatedDecision = ecdeResult.decision;
+
+        // Increment Policy pending counter
+        await Policy.findByIdAndUpdate(policy._id, {
           $inc: {
             'claims.totalClaims': 1,
             'claims.pendingClaims': 1
           }
         });
-        
+
+        recommendationService.logTimelineEvent(claim, 'admin_review_started', 'pending', {
+          reviewerRole: 'Admin'
+        });
+
       } else {
-        // Reject claim
+        // Recommended rejection
         claim.status.current = 'rejected';
         claim.status.rejectedAt = new Date();
-        claim.audit.decisionLogic.automatedDecision = 'rejected';
-        
-        // Update policy claims count
-        await Policy.findByIdAndUpdate(claim.policyId._id, {
+        claim.audit.decisionLogic.automatedDecision = 'recommended_rejection';
+
+        // Increment Policy rejected counter
+        await Policy.findByIdAndUpdate(policy._id, {
           $inc: {
             'claims.totalClaims': 1,
             'claims.rejectedClaims': 1
           }
+        });
+
+        // Also increment worker's rejected claims counter
+        await Worker.findByIdAndUpdate(worker._id, {
+          $inc: {
+            'riskProfile.historicalClaims.totalClaims': 1,
+            'riskProfile.historicalClaims.rejectedClaims': 1
+          }
+        });
+
+        recommendationService.logTimelineEvent(claim, 'admin_decision_completed', 'success', {
+          decision: 'rejected',
+          notes: 'Automated parametric rejection recommended by ECDE due to high risk or lack of trigger match.'
         });
       }
 
@@ -415,12 +471,19 @@ class ClaimService {
         throw new Error('Claim not found');
       }
 
+      // Ensure payout amount is set from suggested compensation
+      const amount = claim.ecdeDetails?.suggestedCompensation !== undefined
+        ? claim.ecdeDetails.suggestedCompensation
+        : claim.financial.payoutAmount;
+      
+      claim.financial.payoutAmount = amount;
+
       // Process UPI payout
       const payoutResult = await payoutService.processUPIPayout({
         upiId: claim.workerId.financialInfo.upiId,
         amount: claim.financial.payoutAmount,
         claimId: claim.claimNumber,
-        description: `GigShield Claim Payout - ${claim.trigger.type}`
+        description: `FixMyPay ECDE Parametric Payout - ${claim.trigger.type}`
       });
 
       if (payoutResult.success) {
@@ -429,9 +492,19 @@ class ClaimService {
         claim.financial.payoutProcessedAt = new Date();
         claim.status.current = 'paid';
         claim.status.paidAt = new Date();
+
+        recommendationService.logTimelineEvent(claim, 'payout_released', 'success', {
+          transactionId: payoutResult.transactionId,
+          amount: claim.financial.payoutAmount,
+          method: 'upi'
+        });
       } else {
         claim.financial.payoutStatus = 'failed';
         claim.financial.payoutFailureReason = payoutResult.error;
+
+        recommendationService.logTimelineEvent(claim, 'payout_released', 'failed', {
+          error: payoutResult.error
+        });
       }
 
       await claim.save();
@@ -506,13 +579,63 @@ class ClaimService {
       claim.fraud.reviewNotes = notes;
       claim.fraud.reviewDecision = decision;
 
+      recommendationService.logTimelineEvent(claim, 'admin_decision_completed', 'success', {
+        decision,
+        notes,
+        reviewerId: adminId
+      });
+
       if (decision === 'approve') {
         claim.status.current = 'approved';
         claim.status.approvedAt = new Date();
+        
+        // Payout amount should match suggested compensation if available
+        const payoutAmount = claim.ecdeDetails?.suggestedCompensation !== undefined
+          ? claim.ecdeDetails.suggestedCompensation
+          : claim.financial.payoutAmount;
+        claim.financial.payoutAmount = payoutAmount;
+
+        // Update Policy approved stats and decrement pending!
+        await Policy.findByIdAndUpdate(claim.policyId, {
+          $inc: {
+            'claims.approvedClaims': 1,
+            'claims.totalPayoutAmount': payoutAmount,
+            'claims.pendingClaims': -1
+          },
+          $set: {
+            'claims.lastClaimDate': new Date()
+          }
+        });
+
+        // Update Worker historical claims stats
+        await Worker.findByIdAndUpdate(claim.workerId, {
+          $inc: {
+            'riskProfile.historicalClaims.totalClaims': 1,
+            'riskProfile.historicalClaims.approvedClaims': 1,
+            'riskProfile.historicalClaims.totalPayoutAmount': payoutAmount
+          }
+        });
+
         await this.processPayout(claimId);
       } else if (decision === 'reject') {
         claim.status.current = 'rejected';
         claim.status.rejectedAt = new Date();
+
+        // Update Policy rejected stats and decrement pending!
+        await Policy.findByIdAndUpdate(claim.policyId, {
+          $inc: {
+            'claims.rejectedClaims': 1,
+            'claims.pendingClaims': -1
+          }
+        });
+
+        // Update Worker historical claims stats
+        await Worker.findByIdAndUpdate(claim.workerId, {
+          $inc: {
+            'riskProfile.historicalClaims.totalClaims': 1,
+            'riskProfile.historicalClaims.rejectedClaims': 1
+          }
+        });
       }
 
       claim.metadata.updatedAt = new Date();

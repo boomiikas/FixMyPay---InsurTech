@@ -8,8 +8,8 @@ async function seedDemoUsers() {
   const workerEmail = 'worker@gigshield.com';
   const adminEmail = 'admin@gigshield.com';
 
-  const workerHash = await bcrypt.hash('password123', 12);
-  const adminHash = await bcrypt.hash('admin123', 12);
+  const workerHash = await bcrypt.hash('applein12', 12);
+  const adminHash = await bcrypt.hash('the34eye', 12);
 
   const existingWorker = await Worker.findOne({ 'personalInfo.email': workerEmail });
   if (!existingWorker) {

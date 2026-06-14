@@ -1,6 +1,7 @@
 const claimService = require('../services/claimService');
 const fraudDetectionService = require('../services/fraudDetectionService');
 const payoutService = require('../services/payoutService');
+const { Claim, Policy } = require('../models');
 
 // Get worker claims
 const getWorkerClaims = async (req, res) => {
@@ -340,6 +341,282 @@ const getPayoutStatus = async (req, res) => {
   }
 };
 
+// Get AI recommendation details
+const getClaimRecommendation = async (req, res) => {
+  try {
+    const { claimId } = req.params;
+    const claim = await claimService.getClaimById(claimId);
+
+    if (!claim) {
+      return res.status(404).json({
+        success: false,
+        message: 'Claim not found'
+      });
+    }
+
+    if (!claim.ecdeDetails || !claim.ecdeDetails.decision) {
+      return res.status(404).json({
+        success: false,
+        message: 'Claim decision recommendation details not found. Run validation first.'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        claimId: claim._id,
+        claimNumber: claim.claimNumber,
+        reliabilityScore: claim.ecdeDetails.reliabilityScore,
+        confidenceScore: claim.ecdeDetails.confidenceScore,
+        suggestedCompensation: claim.ecdeDetails.suggestedCompensation,
+        recommendation: claim.ecdeDetails.decision === 'recommended_approval'
+          ? 'Recommended Approval'
+          : claim.ecdeDetails.decision === 'manual_review'
+            ? 'Manual Review Required'
+            : 'Recommended Rejection',
+        whyThisRecommendation: claim.ecdeDetails.whyThisRecommendation,
+        explanations: claim.ecdeDetails.explanation,
+        evaluatedAt: claim.ecdeDetails.evaluatedAt
+      }
+    });
+  } catch (error) {
+    console.error('Get claim recommendation error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch recommendation details'
+    });
+  }
+};
+
+// Force evaluate/re-run ECDE (Admin only)
+const forceEvaluateECDE = async (req, res) => {
+  try {
+    const { claimId } = req.params;
+    
+    // Fetch and validate
+    const updatedClaim = await claimService.validateClaim(claimId);
+
+    res.json({
+      success: true,
+      message: 'ECDE evaluated successfully',
+      data: updatedClaim
+    });
+  } catch (error) {
+    console.error('Force evaluate ECDE error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to evaluate ECDE'
+    });
+  }
+};
+
+// Get claim journey timeline
+const getClaimTimeline = async (req, res) => {
+  try {
+    const { claimId } = req.params;
+    const claim = await Claim.findById(claimId).select('timeline claimNumber status');
+
+    if (!claim) {
+      return res.status(404).json({
+        success: false,
+        message: 'Claim not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        claimNumber: claim.claimNumber,
+        status: claim.status.current,
+        timeline: claim.timeline || []
+      }
+    });
+  } catch (error) {
+    console.error('Get claim timeline error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch timeline details'
+    });
+  }
+};
+
+// Get advanced dashboard metrics for ECDE (Admin widgets)
+const getAdminDashboardWidgets = async (req, res) => {
+  try {
+    // 1. Workers protected (distinct workerIds with active policies)
+    const activeWorkersCount = await Policy.distinct('workerId', { 'status.current': 'active' });
+    const workersProtected = activeWorkersCount.length;
+
+    // 2. Count metrics from Claim collection
+    const totalClaims = await Claim.countDocuments({});
+    
+    // Recommended count categories
+    const recApprovalCount = await Claim.countDocuments({ 'ecdeDetails.decision': 'recommended_approval' });
+    const recReviewCount = await Claim.countDocuments({ 'ecdeDetails.decision': 'manual_review' });
+    const recRejectionCount = await Claim.countDocuments({ 'ecdeDetails.decision': 'recommended_rejection' });
+
+    // Actual decision counts
+    const approvedCount = await Claim.countDocuments({ 'status.current': { $in: ['approved', 'paid'] } });
+    const underReviewCount = await Claim.countDocuments({ 'status.current': 'under_review' });
+    const rejectedCount = await Claim.countDocuments({ 'status.current': 'rejected' });
+
+    // 3. Compensation aggregations
+    const compensationStats = await Claim.aggregate([
+      {
+        $group: {
+          _id: null,
+          totalRecommended: { $sum: '$ecdeDetails.suggestedCompensation' },
+          avgRecommended: { $avg: '$ecdeDetails.suggestedCompensation' },
+          totalPaid: {
+            $sum: {
+              $cond: [
+                { $eq: ['$status.current', 'paid'] },
+                '$financial.payoutAmount',
+                0
+              ]
+            }
+          },
+          incomeProtected: {
+            $sum: {
+              $cond: [
+                { $in: ['$status.current', ['approved', 'paid']] },
+                '$ecdeDetails.suggestedCompensation',
+                0
+              ]
+            }
+          },
+          totalFraudPrevented: { $sum: '$ecdeDetails.fraudPrevention.potentialFraudPrevented' },
+          totalCompensationSaved: { $sum: '$ecdeDetails.fraudPrevention.compensationSaved' },
+          avgReliability: { $avg: '$ecdeDetails.reliabilityScore' }
+        }
+      }
+    ]);
+
+    const stats = compensationStats[0] || {
+      totalRecommended: 0,
+      avgRecommended: 0,
+      totalPaid: 0,
+      incomeProtected: 0,
+      totalFraudPrevented: 0,
+      totalCompensationSaved: 0,
+      avgReliability: 0
+    };
+
+    // 4. Operational processing speed / SLA metrics
+    const speedStats = await Claim.aggregate([
+      {
+        $match: { 'ecdeDetails.decisionTimeMs': { $exists: true } }
+      },
+      {
+        $group: {
+          _id: null,
+          avgTime: { $avg: '$ecdeDetails.decisionTimeMs' },
+          minTime: { $min: '$ecdeDetails.decisionTimeMs' },
+          maxTime: { $max: '$ecdeDetails.decisionTimeMs' },
+          slaCompliant: {
+            $sum: {
+              $cond: [
+                { $eq: ['$ecdeDetails.isWithinSLA', true] },
+                1,
+                0
+              ]
+            }
+          },
+          totalWithSpeed: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const speeds = speedStats[0] || {
+      avgTime: 0,
+      minTime: 0,
+      maxTime: 0,
+      slaCompliant: 0,
+      totalWithSpeed: 0
+    };
+
+    // Calculate admin review queue time bottlenecks
+    const queueTimes = await Claim.aggregate([
+      {
+        $match: {
+          'status.current': { $in: ['approved', 'rejected', 'paid'] },
+          'ecdeDetails.evaluatedAt': { $exists: true }
+        }
+      },
+      {
+        $project: {
+          durationMs: {
+            $subtract: [
+              {
+                $cond: [
+                  { $gt: ['$status.paidAt', null] },
+                  '$status.paidAt',
+                  {
+                    $cond: [
+                      { $gt: ['$status.approvedAt', null] },
+                      '$status.approvedAt',
+                      '$status.rejectedAt'
+                    ]
+                  }
+                ]
+              },
+              '$ecdeDetails.evaluatedAt'
+            ]
+          }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          avgQueueTime: { $avg: '$durationMs' }
+        }
+      }
+    ]);
+
+    const avgQueueTimeMs = queueTimes[0]?.avgQueueTime || 0;
+
+    // SLA compliance rate
+    const slaComplianceRate = speeds.totalWithSpeed > 0
+      ? ((speeds.slaCompliant / speeds.totalWithSpeed) * 100).toFixed(1)
+      : '100.0';
+
+    res.json({
+      success: true,
+      data: {
+        businessImpact: {
+          workersProtected,
+          totalClaims,
+          claimsApproved: approvedCount,
+          claimsUnderReview: underReviewCount,
+          claimsRejected: rejectedCount,
+          claimsRecommendedApproval: recApprovalCount,
+          claimsRecommendedReview: recReviewCount,
+          claimsRecommendedRejection: recRejectionCount,
+          incomeProtected: Math.round(stats.incomeProtected),
+          fraudPrevented: Math.round(stats.totalFraudPrevented || stats.totalCompensationSaved),
+          totalCompensationPaid: Math.round(stats.totalPaid),
+          totalRecommendedCompensation: Math.round(stats.totalRecommended),
+          averageCompensationPerClaim: Math.round(stats.avgRecommended),
+          averageReliabilityScore: Math.round(stats.avgReliability || 0)
+        },
+        operationalEfficiency: {
+          averageClaimProcessingTimeSec: speeds.totalWithSpeed > 0 ? (speeds.avgTime / 1000).toFixed(2) : '0.00',
+          fastestClaimProcessingTimeSec: speeds.totalWithSpeed > 0 ? (speeds.minTime / 1000).toFixed(2) : '0.00',
+          slowestClaimProcessingTimeSec: speeds.totalWithSpeed > 0 ? (speeds.maxTime / 1000).toFixed(2) : '0.00',
+          averageAdminQueueTimeMin: avgQueueTimeMs > 0 ? (avgQueueTimeMs / (1000 * 60)).toFixed(1) : '0.0',
+          slaComplianceRatePercent: parseFloat(slaComplianceRate)
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Get admin dashboard widgets error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch dashboard statistics'
+    });
+  }
+};
+
 module.exports = {
   getWorkerClaims,
   getClaimById,
@@ -354,5 +631,9 @@ module.exports = {
   getPayoutStatistics,
   processBatchPayouts,
   processRefund,
-  getPayoutStatus
+  getPayoutStatus,
+  getClaimRecommendation,
+  forceEvaluateECDE,
+  getClaimTimeline,
+  getAdminDashboardWidgets
 };

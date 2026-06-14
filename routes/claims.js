@@ -7,6 +7,8 @@ const { authenticateWorker, authenticateAdmin, authorize } = require('../middlew
 router.get('/', authenticateWorker, claimController.getWorkerClaims);
 router.get('/analytics', authenticateWorker, claimController.getClaimAnalytics);
 router.get('/:claimId', authenticateWorker, claimController.getClaimById);
+router.get('/:claimId/recommendation', authenticateWorker, claimController.getClaimRecommendation);
+router.get('/:claimId/timeline', authenticateWorker, claimController.getClaimTimeline);
 router.post('/', authenticateWorker, claimController.createManualClaim);
 router.post('/:claimId/retry-payout', authenticateWorker, claimController.retryPayout);
 
@@ -15,7 +17,11 @@ router.get('/payout/:transactionId/status', claimController.getPayoutStatus);
 
 // Admin Routes
 router.get('/admin/all', authenticateAdmin, authorize(['view_claims']), claimController.getAllClaims);
+router.get('/admin/dashboard/widgets', authenticateAdmin, authorize(['view_claims']), claimController.getAdminDashboardWidgets);
 router.get('/admin/review', authenticateAdmin, authorize(['investigate_claims']), claimController.getClaimsForReview);
+router.get('/admin/:claimId/recommendation', authenticateAdmin, authorize(['view_claims']), claimController.getClaimRecommendation);
+router.get('/admin/:claimId/timeline', authenticateAdmin, authorize(['view_claims']), claimController.getClaimTimeline);
+router.post('/admin/:claimId/recommend', authenticateAdmin, authorize(['investigate_claims']), claimController.forceEvaluateECDE);
 router.post('/admin/:claimId/review', authenticateAdmin, authorize(['investigate_claims']), claimController.reviewClaim);
 router.get('/admin/fraud/statistics', authenticateAdmin, authorize(['view_claims']), claimController.getFraudStatistics);
 router.get('/admin/worker/:workerId/analyze', authenticateAdmin, authorize(['investigate_claims']), claimController.analyzeWorker);

@@ -92,12 +92,12 @@ npm start
 
 ### Worker Portal
 - **URL**: http://localhost:3000
-- **Login**: worker@gigshield.com / password123
+- **Login**: worker@gigshield.com / applein12
 - **Features**: Dashboard, Policies, Claims, Profile
 
 ### Admin Portal
 - **URL**: http://localhost:3000/admin
-- **Login**: admin@gigshield.com / admin123
+- **Login**: admin@gigshield.com / the34eye
 - **Features**: Dashboard, Workers, Policies, Claims, Simulation, Settings
 
 ### API Documentation
