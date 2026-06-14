@@ -1,0 +1,42 @@
+1. Explainable Claim Decision Engine (ECDE)
+Instead of using opaque "black-box" machine learning models for claim approvals, the platform runs a transparent, audit-friendly rule engine (ECDE) that evaluates:
+
+Coverage Verification: Checks if the policy is active and if the weekly premium is paid.
+Environmental Impact Factor (EIF): Automatically calculates how much the weather, air pollution, or traffic congestion exceeded the policy's thresholds.
+Reliability Score (0-100): A composite score based on trigger verification, coverage status, fraud score, and worker claim history.
+Confidence Score (0-100): Calculated dynamically based on the inverse fraud probability score.
+Decoupled Compensation: Suggests a fair payout proportional to the severity of the environmental disruption (up to the policy's maximum limit).
+Rule Decisions: Recommends approval, rejection, or manual review with clear textual explanations.
+2. Claim Timeline & Audit Trail
+For regulatory compliance, transparency, and easier demo presentation, every claim has a step-by-step history log detailing each phase of processing:
+
+Claim Submission (Log created)
+Weather Verification (Sensor analysis logs: rainfall, wind, temp)
+Traffic Verification (Congestion ratio and speed index analysis)
+Pollution Verification (AQI and PM2.5 details)
+Fraud Detection (Checks GPS spoofing risk and device fingerprints)
+Reliability Score Generated (Breakdown of contributing factors)
+ECDE Recommendation Generated (Recommends approval/rejection)
+Admin Review Queue Log (Logs when review starts/completes)
+Payout Release (Logs transaction success/failure via UPI)
+3. Worker-Facing Portal Features
+Designed for delivery partners (e.g., Swiggy, Amazon Flex) to manage their insurance safety net:
+
+Weekly Premium Flow: Check current premium status, view tiered pricing, and pay/renew weekly premiums.
+Coverage Management: Activate, view active coverages, check historic policies, or cancel policies.
+Claim Center: Submit a manual claim, track the status of current claims, and view claim payouts.
+Real-time Threat Monitoring: Start/stop ambient location monitoring to check active environmental risks (Heavy Rain, Traffic, Air Quality).
+4. Admin-Facing Portal Features
+A command-and-control dashboard for operational oversight:
+
+KPI Analytics Dashboard: Real-time metrics tracking total active workers, premium revenue, total income protected, processing SLAs, and fraud metrics.
+Review Queue: Review pending claims, inspect claims flagged by the ECDE, and approve or reject payouts with single-click actions.
+Worker Deep Dive: View comprehensive worker risk analysis, active device fingerprints, historical claims, and verification states (Aadhaar, Bank, Email, Phone).
+Geographic Overview Map: Visualize the live distribution of active delivery partners, environmental threats, and active claim regions.
+5. Interactive Simulation Engine
+A testing sandbox for running live presentations or checking the ECDE rule engine under simulated conditions. Admins can run scenarios:
+
+Heavy Rain Scenario (Simulates high precipitation, triggering weather claims)
+Extreme Pollution Scenario (Simulates hazardous PM2.5 / AQI values)
+Severe Traffic Scenario (Simulates major delivery delays due to gridlock)
+GPS Spoofing / Fraud Scenario (Simulates high-risk activities to test ML/rule detection)
